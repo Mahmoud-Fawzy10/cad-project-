@@ -9,7 +9,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 class MobiCadEngineTest {
 
     @Test
@@ -197,4 +197,82 @@ class MobiCadEngineTest {
         )
         assertFalse(hitCorner)
     }
+
+    @Test
+    fun testCodeCadScriptParsingAndExecution() {
+        val project = CadProject(name = "Script Test")
+        val script = """
+            // Test Script
+            material("ALUMINUM_6061")
+            width = 40.0
+            height = 20.0
+            box(w=width, l=30.0, h=height)
+            hole(diameter=4.0, depth=height, x=0.0, y=0.0)
+            fillet(radius=1.5)
+        """.trimIndent()
+
+        val result = CodeCadEngine.parseAndExecute(script, project)
+        assertTrue(result.isSuccess)
+        assertEquals(3, result.featuresCount)
+        assertEquals(Material.ALUMINUM_6061, project.material)
+        assertNotNull(project.generatedMesh)
+        assertTrue(project.generatedMesh!!.triangles.isNotEmpty())
+    }
+
+    @Test
+    fun testProjectToScriptRoundtrip() {
+        val project = CadProject(name = "Roundtrip Part", material = Material.BRASS_C360)
+        val boxFeat = Feature(name = "Box", type = FeatureType.PRIMITIVE_BOX)
+        boxFeat.numericParams["width"] = 50.0
+        boxFeat.numericParams["length"] = 40.0
+        boxFeat.numericParams["height"] = 25.0
+        project.features.add(boxFeat)
+
+        val script = CodeCadEngine.projectToScript(project)
+        assertTrue(script.contains("material(\"Brass C36000\")"))
+        assertTrue(script.contains("box("))
+
+        // Re-execute script into a fresh project
+        val freshProject = CadProject(name = "Fresh")
+        val result = CodeCadEngine.parseAndExecute(script, freshProject)
+        assertTrue(result.isSuccess)
+        assertEquals(Material.BRASS_C360, freshProject.material)
+        assertEquals(1, freshProject.features.size)
+        assertNotNull(freshProject.generatedMesh)
+    }
+
+    @Test
+    fun testCodeCadTemplatesExecution() {
+        for ((tmplName, tmplCode) in CodeCadEngine.TEMPLATES) {
+            val project = CadProject(name = tmplName)
+            val res = CodeCadEngine.parseAndExecute(tmplCode, project)
+            assertTrue("Template '$tmplName' failed: ${res.message}", res.isSuccess)
+            assertNotNull("Template '$tmplName' produced null mesh", project.generatedMesh)
+            assertTrue("Template '$tmplName' produced empty triangles", project.generatedMesh!!.triangles.isNotEmpty())
+        }
+    }
+
+    @Test
+    fun testAiCadGenerativeOfflineEngine() {
+        val project = CadProject(name = "AI Test")
+
+        // 1. ESP32 enclosure prompt
+        val resEnclosure = AiCadGenerator.offlineGenerativeCad("صمم علبة ESP32 مع ثقوب M3", project, true)
+        assertTrue(resEnclosure.isSuccess)
+        assertTrue(resEnclosure.generatedScript.contains("box("))
+        assertTrue(resEnclosure.generatedScript.contains("hole("))
+
+        // Execute generated script to verify validity
+        val exec1 = CodeCadEngine.parseAndExecute(resEnclosure.generatedScript, project)
+        assertTrue(exec1.isSuccess)
+
+        // 2. Motor mount prompt
+        val resMotor = AiCadGenerator.offlineGenerativeCad("Create a NEMA 17 motor bracket with mounting holes", project, false)
+        assertTrue(resMotor.isSuccess)
+        assertTrue(resMotor.generatedScript.contains("NEMA17") || resMotor.generatedScript.contains("hole("))
+
+        val exec2 = CodeCadEngine.parseAndExecute(resMotor.generatedScript, project)
+        assertTrue(exec2.isSuccess)
+    }
 }
+

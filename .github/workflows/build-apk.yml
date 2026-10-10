@@ -16,15 +16,26 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
           cache: 'gradle'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+
+      - name: Prepare Keystore and Environment
+        run: |
+          if [ -f "debug.keystore.base64" ] && [ ! -f "debug.keystore" ]; then
+            echo "Restoring debug.keystore from debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+          if [ -f ".env.example" ] && [ ! -f ".env" ]; then
+            echo "Creating .env from .env.example..."
+            cp .env.example .env
+          fi
 
       - name: Grant Execute Permission for Gradlew
         run: |
@@ -35,10 +46,18 @@ jobs:
       - name: Run Unit & Geometry Tests
         run: |
           if [ -f "./gradlew" ]; then
-            ./gradlew :app:testDebugUnitTest --no-daemon
+            ./gradlew :app:testDebugUnitTest --no-daemon --info --stacktrace
           else
-            gradle :app:testDebugUnitTest --no-daemon
+            gradle :app:testDebugUnitTest --no-daemon --info --stacktrace
           fi
+
+      - name: Upload Unit & Geometry Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 7
 
       - name: Build Debug APK
         run: |

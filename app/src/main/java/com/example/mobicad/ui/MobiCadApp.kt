@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.mobicad.geometry.CodeCadEngine
 import com.example.mobicad.geometry.ParametricKernel
 import com.example.mobicad.geometry.ProjectSerializer
 import com.example.mobicad.geometry.RoboticsLibrary
@@ -30,7 +31,8 @@ import com.example.ui.theme.*
 
 enum class ActiveScreenMode {
     VIEWPORT_3D,
-    SKETCH_2D
+    SKETCH_2D,
+    CODE_CAD
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,6 +83,46 @@ fun MobiCadApp() {
     // Feature creation dialog (Extrude, Cut, Hole, etc.)
     var pendingFeatureType by remember { mutableStateOf<FeatureType?>(null) }
     var editingFeature by remember { mutableStateOf<Feature?>(null) }
+    var activeCodeScript by remember { mutableStateOf<String?>(null) }
+
+    if (activeMode == ActiveScreenMode.CODE_CAD) {
+        CodeCadEditorView(
+            project = currentProject,
+            lang = currentLang,
+            initialScript = activeCodeScript,
+            onBackTo3D = {
+                activeCodeScript = null
+                camera.fitToBoundingBox(currentProject.generatedMesh?.boundingBox ?: BoundingBox.EMPTY)
+                activeMode = ActiveScreenMode.VIEWPORT_3D
+            },
+            onOpenAiPrompt = {
+                showCopilotDialog = true
+            },
+            onPushUndo = {
+                pushUndoState()
+            }
+        )
+
+        if (showCopilotDialog) {
+            CadCopilotDialog(
+                project = currentProject,
+                lang = currentLang,
+                onApplyScriptToModel = { script ->
+                    pushUndoState()
+                    CodeCadEngine.parseAndExecute(script, currentProject)
+                    activeCodeScript = script
+                    camera.fitToBoundingBox(currentProject.generatedMesh?.boundingBox ?: BoundingBox.EMPTY)
+                },
+                onOpenInCodeEditor = { script ->
+                    pushUndoState()
+                    activeCodeScript = script
+                    activeMode = ActiveScreenMode.CODE_CAD
+                },
+                onDismiss = { showCopilotDialog = false }
+            )
+        }
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -204,6 +246,22 @@ fun MobiCadApp() {
                             Icon(Icons.Default.Create, contentDescription = null, tint = CadBackgroundDark, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(CadStrings.get("sketch", currentLang), color = CadBackgroundDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        // 1.5. Code CAD Scripting Editor Button
+                        Button(
+                            onClick = {
+                                pushUndoState()
+                                activeCodeScript = CodeCadEngine.projectToScript(currentProject)
+                                activeMode = ActiveScreenMode.CODE_CAD
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = CadSurfaceVariant),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier.testTag("toolbar_code_cad_btn")
+                        ) {
+                            Icon(Icons.Default.Code, contentDescription = null, tint = CadCyan, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(CadStrings.get("code_cad", currentLang), color = Color.White, fontSize = 12.sp)
                         }
 
                         // 2. Extrude Button
@@ -367,6 +425,7 @@ fun MobiCadApp() {
                         )
                     }
                 }
+                ActiveScreenMode.CODE_CAD -> {}
             }
 
             // Feature Tree Drawer Overlay
@@ -489,6 +548,16 @@ fun MobiCadApp() {
                 CadCopilotDialog(
                     project = currentProject,
                     lang = currentLang,
+                    onApplyScriptToModel = { script ->
+                        pushUndoState()
+                        CodeCadEngine.parseAndExecute(script, currentProject)
+                        camera.fitToBoundingBox(currentProject.generatedMesh?.boundingBox ?: BoundingBox.EMPTY)
+                    },
+                    onOpenInCodeEditor = { script ->
+                        pushUndoState()
+                        activeCodeScript = script
+                        activeMode = ActiveScreenMode.CODE_CAD
+                    },
                     onDismiss = { showCopilotDialog = false }
                 )
             }

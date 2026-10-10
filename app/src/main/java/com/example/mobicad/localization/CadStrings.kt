@@ -104,6 +104,12 @@ object CadStrings {
         "send" to Pair("Send", "إرسال"),
         "generating" to Pair("Computing...", "جارٍ الحساب الهندسي..."),
         "offline_notice" to Pair("100% Offline Parametric Kernel Running", "يعمل نواة النمذجة المحلية دون اتصال بالإنترنت 100%"),
-        "exact_dimensions" to Pair("Exact Engineering Dimensions", "أبعاد هندسية دقيقة بمليمترات")
+        "exact_dimensions" to Pair("Exact Engineering Dimensions", "أبعاد هندسية دقيقة بمليمترات"),
+        "code_cad" to Pair("Code CAD", "التصميم بالكود"),
+        "run_script" to Pair("Run Script", "تشغيل الكود"),
+        "templates" to Pair("Templates", "نماذج برمجية"),
+        "apply_to_3d" to Pair("Apply to 3D", "تطبيق على 3D"),
+        "open_in_code_editor" to Pair("Edit in Code CAD", "تعديل بالكود"),
+        "ai_generated_design" to Pair("AI Generated Design", "تصميم مولّد بالذكاء الاصطناعي")
     )
 }
