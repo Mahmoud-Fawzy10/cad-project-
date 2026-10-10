@@ -1,0 +1,57 @@
+name: Initialize MobiCAD Release Signing
+
+on:
+workflow_dispatch:
+
+permissions:
+contents: read
+
+jobs:
+initialize:
+name: Create Release Signing Key
+runs-on: ubuntu-latest
+
+steps:
+  - name: Generate Persistent Signing Key
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_KEY_ADMIN_TOKEN }}
+      REPO: ${{ github.repository }}
+    run: |
+      set -euo pipefail
+
+      if [ -z "$GH_TOKEN" ]; then
+        echo "::error::Create RELEASE_KEY_ADMIN_TOKEN first."
+        exit 1
+      fi
+
+      API="https://api.github.com/repos/$REPO/actions/secrets"
+
+      if curl -fsS \
+        -H "Authorization: Bearer $GH_TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        "$API" > secrets.json; then
+        if jq -e '.secrets[]?.name == "KEYSTORE_BASE64"' secrets.json >/dev/null; then
+          echo "::error::A signing key secret already exists. Refusing to replace it."
+          exit 1
+        fi
+      else
+        echo "::error::Unable to inspect repository secrets."
+        exit 1
+      fi
+
+      mkdir -p "$RUNNER_TEMP/signing"
+
+      keytool -genkeypair \
+        -keystore "$RUNNER_TEMP/signing/release.jks" \
+        -storetype JKS \
+        -storepass "$(openssl rand -hex 24)" \
+        -alias upload \
+        -keypass "$(openssl rand -hex 24)" \
+        -keyalg RSA \
+        -keysize 2048 \
+        -validity 10000 \
+        -dname "CN=MobiCAD Pro,O=MobiCAD,C=EG" \
+        -noprompt
+
+      echo "::error::This simplified workflow cannot safely persist the generated passwords and keystore. Use the complete encrypted-secret provisioning workflow before generating a production key."
+      exit 1
