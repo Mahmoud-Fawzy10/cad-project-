@@ -1,57 +1,144 @@
 name: Initialize MobiCAD Release Signing
 
 on:
-workflow_dispatch:
+  workflow_dispatch:
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-initialize:
-name: Create Release Signing Key
-runs-on: ubuntu-latest
+  initialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
-steps:
-  - name: Generate Persistent Signing Key
-    env:
-      GH_TOKEN: ${{ secrets.RELEASE_KEY_ADMIN_TOKEN }}
-      REPO: ${{ github.repository }}
-    run: |
-      set -euo pipefail
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      if [ -z "$GH_TOKEN" ]; then
-        echo "::error::Create RELEASE_KEY_ADMIN_TOKEN first."
-        exit 1
-      fi
+      - name: Generate and securely save release key
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_KEY_ADMIN_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet pynacl
 
-      API="https://api.github.com/repos/$REPO/actions/secrets"
+          python <<'PY'
+          import os
+          import json
+          import base64
+          import secrets
+          import tempfile
+          import subprocess
+          import urllib.request
+          import urllib.error
+          from pathlib import Path
+          from nacl.public import PublicKey, SealedBox
 
-      if curl -fsS \
-        -H "Authorization: Bearer $GH_TOKEN" \
-        -H "Accept: application/vnd.github+json" \
-        "$API" > secrets.json; then
-        if jq -e '.secrets[]?.name == "KEYSTORE_BASE64"' secrets.json >/dev/null; then
-          echo "::error::A signing key secret already exists. Refusing to replace it."
-          exit 1
-        fi
-      else
-        echo "::error::Unable to inspect repository secrets."
-        exit 1
-      fi
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
 
-      mkdir -p "$RUNNER_TEMP/signing"
+          if not token:
+              raise SystemExit(
+                  "Missing RELEASE_KEY_ADMIN_TOKEN repository secret."
+              )
 
-      keytool -genkeypair \
-        -keystore "$RUNNER_TEMP/signing/release.jks" \
-        -storetype JKS \
-        -storepass "$(openssl rand -hex 24)" \
-        -alias upload \
-        -keypass "$(openssl rand -hex 24)" \
-        -keyalg RSA \
-        -keysize 2048 \
-        -validity 10000 \
-        -dname "CN=MobiCAD Pro,O=MobiCAD,C=EG" \
-        -noprompt
+          api = f"https://api.github.com/repos/{repo}/actions/secrets"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "Content-Type": "application/json",
+          }
 
-      echo "::error::This simplified workflow cannot safely persist the generated passwords and keystore. Use the complete encrypted-secret provisioning workflow before generating a production key."
-      exit 1
+          def request(url, method="GET", payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request(
+                  url, data=data, headers=headers, method=method
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  body = response.read()
+                  return json.loads(body) if body else {}
+
+          existing = request(api + "?per_page=100")
+          if any(
+              item["name"] == "KEYSTORE_BASE64"
+              for item in existing.get("secrets", [])
+          ):
+              raise SystemExit(
+                  "A release key already exists. Refusing to replace it."
+              )
+
+          public = request(api + "/public-key")
+          key_id = public["key_id"]
+          box = SealedBox(PublicKey(base64.b64decode(public["key"])))
+
+          store_password = secrets.token_hex(24)
+          key_password = secrets.token_hex(24)
+
+          with tempfile.TemporaryDirectory() as directory:
+              keystore = Path(directory) / "release.jks"
+              env = os.environ.copy()
+              env["STORE_PASS"] = store_password
+              env["KEY_PASS"] = key_password
+
+              result = subprocess.run(
+                  [
+                      "keytool", "-genkeypair",
+                      "-keystore", str(keystore),
+                      "-storetype", "JKS",
+                      "-storepass:env", "STORE_PASS",
+                      "-keypass:env", "KEY_PASS",
+                      "-alias", "upload",
+                      "-keyalg", "RSA",
+                      "-keysize", "2048",
+                      "-validity", "10000",
+                      "-dname", "CN=MobiCAD Pro,O=MobiCAD,C=EG",
+                      "-noprompt",
+                  ],
+                  env=env,
+                  capture_output=True,
+                  text=True,
+              )
+
+              if result.returncode:
+                  raise SystemExit(
+                      "Key generation failed: " + result.stderr[-1500:]
+                  )
+
+              values = {
+                  "KEYSTORE_PASSWORD": store_password,
+                  "KEY_PASSWORD": key_password,
+                  "KEY_ALIAS": "upload",
+                  "KEYSTORE_BASE64": base64.b64encode(
+                      keystore.read_bytes()
+                  ).decode("ascii"),
+              }
+
+              # Save the keystore last so it acts as a completion marker.
+              names = [
+                  "KEYSTORE_PASSWORD",
+                  "KEY_PASSWORD",
+                  "KEY_ALIAS",
+                  "KEYSTORE_BASE64",
+              ]
+
+              for name in names:
+                  encrypted = base64.b64encode(
+                      box.encrypt(values[name].encode())
+                  ).decode("ascii")
+
+                  request(
+                      f"{api}/{name}",
+                      method="PUT",
+                      payload={
+                          "encrypted_value": encrypted,
+                          "key_id": key_id,
+                      },
+                  )
+                  print(f"Saved repository secret: {name}")
+
+          print("Release signing key initialized successfully.")
+          PY
