@@ -12,37 +12,30 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Generate and securely save release key
         env:
           GH_TOKEN: ${{ secrets.RELEASE_KEY_ADMIN_TOKEN }}
           REPO: ${{ github.repository }}
+          STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
           python -m pip install --quiet pynacl
 
           python <<'PY'
-          import os
-          import json
-          import base64
-          import secrets
-          import tempfile
-          import subprocess
+          import os, json, base64, tempfile, subprocess
           import urllib.request
-          import urllib.error
           from pathlib import Path
           from nacl.public import PublicKey, SealedBox
 
           token = os.environ["GH_TOKEN"]
           repo = os.environ["REPO"]
+          store_pass = os.environ["STORE_PASS"]
+          key_pass = os.environ["KEY_PASS"]
 
-          if not token:
+          if not all([token, store_pass, key_pass]):
               raise SystemExit(
-                  "Missing RELEASE_KEY_ADMIN_TOKEN repository secret."
+                  "Missing required repository secrets."
               )
 
           api = f"https://api.github.com/repos/{repo}/actions/secrets"
@@ -64,25 +57,25 @@ jobs:
 
           existing = request(api + "?per_page=100")
           if any(
-              item["name"] == "KEYSTORE_BASE64"
-              for item in existing.get("secrets", [])
+              s["name"] == "KEYSTORE_BASE64"
+              for s in existing.get("secrets", [])
           ):
               raise SystemExit(
-                  "A release key already exists. Refusing to replace it."
+                  "A signing key already exists. Refusing to replace it."
               )
 
           public = request(api + "/public-key")
           key_id = public["key_id"]
           box = SealedBox(PublicKey(base64.b64decode(public["key"])))
 
-          store_password = secrets.token_hex(24)
-          key_password = secrets.token_hex(24)
+          alias = "mahmoud-apps"
 
           with tempfile.TemporaryDirectory() as directory:
-              keystore = Path(directory) / "release.jks"
+              keystore = Path(directory) / "mahmoud-apps.jks"
+
               env = os.environ.copy()
-              env["STORE_PASS"] = store_password
-              env["KEY_PASS"] = key_password
+              env["STORE_PASS"] = store_pass
+              env["KEY_PASS"] = key_pass
 
               result = subprocess.run(
                   [
@@ -91,11 +84,12 @@ jobs:
                       "-storetype", "JKS",
                       "-storepass:env", "STORE_PASS",
                       "-keypass:env", "KEY_PASS",
-                      "-alias", "upload",
+                      "-alias", alias,
                       "-keyalg", "RSA",
                       "-keysize", "2048",
                       "-validity", "10000",
-                      "-dname", "CN=MobiCAD Pro,O=MobiCAD,C=EG",
+                      "-dname",
+                      "CN=Mahmoud Mohamed Fawzy,O=MobiCAD,C=EG",
                       "-noprompt",
                   ],
                   env=env,
@@ -109,23 +103,13 @@ jobs:
                   )
 
               values = {
-                  "KEYSTORE_PASSWORD": store_password,
-                  "KEY_PASSWORD": key_password,
-                  "KEY_ALIAS": "upload",
+                  "KEY_ALIAS": alias,
                   "KEYSTORE_BASE64": base64.b64encode(
                       keystore.read_bytes()
                   ).decode("ascii"),
               }
 
-              # Save the keystore last so it acts as a completion marker.
-              names = [
-                  "KEYSTORE_PASSWORD",
-                  "KEY_PASSWORD",
-                  "KEY_ALIAS",
-                  "KEYSTORE_BASE64",
-              ]
-
-              for name in names:
+              for name in ["KEY_ALIAS", "KEYSTORE_BASE64"]:
                   encrypted = base64.b64encode(
                       box.encrypt(values[name].encode())
                   ).decode("ascii")
@@ -140,5 +124,5 @@ jobs:
                   )
                   print(f"Saved repository secret: {name}")
 
-          print("Release signing key initialized successfully.")
+          print("Release signing key created successfully.")
           PY
