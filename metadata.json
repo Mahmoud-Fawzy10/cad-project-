@@ -1,0 +1,6 @@
+{
+  "name": "MobiCAD Pro",
+  "description": "Professional offline parametric 3D mechanical CAD for Android with 2D geometric constraints, feature tree, robotics library, assemblies, mass properties, and 3D export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
