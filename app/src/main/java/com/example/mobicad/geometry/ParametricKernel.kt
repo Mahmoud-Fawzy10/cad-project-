@@ -124,6 +124,56 @@ object ParametricKernel {
                         feat.isValid = true
                         feat.errorMessage = null
                     }
+                    FeatureType.PRIMITIVE_BOX -> {
+                        val w = feat.getParam("width", 30.0)
+                        val l = feat.getParam("length", 30.0)
+                        val h = feat.getParam("height", 20.0)
+                        val cx = feat.getParam("x", 0.0)
+                        val cy = feat.getParam("y", 0.0)
+                        val cz = feat.getParam("z", 0.0)
+                        val box = createBox(cx - w / 2.0, cy - l / 2.0, cz, cx + w / 2.0, cy + l / 2.0, cz + h)
+                        currentSolid = if (currentSolid == null) box else booleanUnion(currentSolid, box)
+                        feat.isValid = true
+                    }
+                    FeatureType.PRIMITIVE_CYLINDER -> {
+                        val r = feat.getParam("radius", 15.0)
+                        val h = feat.getParam("height", 30.0)
+                        val cx = feat.getParam("x", 0.0)
+                        val cy = feat.getParam("y", 0.0)
+                        val cz = feat.getParam("z", 0.0)
+                        val cyl = createCylinder(r, h, cx, cy, cz)
+                        currentSolid = if (currentSolid == null) cyl else booleanUnion(currentSolid, cyl)
+                        feat.isValid = true
+                    }
+                    FeatureType.PRIMITIVE_SPHERE -> {
+                        val r = feat.getParam("radius", 15.0)
+                        val cx = feat.getParam("x", 0.0)
+                        val cy = feat.getParam("y", 0.0)
+                        val cz = feat.getParam("z", 0.0)
+                        val sph = createSphere(r, cx, cy, cz)
+                        currentSolid = if (currentSolid == null) sph else booleanUnion(currentSolid, sph)
+                        feat.isValid = true
+                    }
+                    FeatureType.PRIMITIVE_CONE -> {
+                        val r = feat.getParam("radius", 15.0)
+                        val h = feat.getParam("height", 30.0)
+                        val cx = feat.getParam("x", 0.0)
+                        val cy = feat.getParam("y", 0.0)
+                        val cz = feat.getParam("z", 0.0)
+                        val cone = createCone(r, h, cx, cy, cz)
+                        currentSolid = if (currentSolid == null) cone else booleanUnion(currentSolid, cone)
+                        feat.isValid = true
+                    }
+                    FeatureType.PRIMITIVE_TORUS -> {
+                        val majorR = feat.getParam("majorRadius", 20.0)
+                        val minorR = feat.getParam("minorRadius", 6.0)
+                        val cx = feat.getParam("x", 0.0)
+                        val cy = feat.getParam("y", 0.0)
+                        val cz = feat.getParam("z", 0.0)
+                        val torus = createTorus(majorR, minorR, cx, cy, cz)
+                        currentSolid = if (currentSolid == null) torus else booleanUnion(currentSolid, torus)
+                        feat.isValid = true
+                    }
                     else -> {
                         // Other features
                     }
@@ -504,6 +554,98 @@ object ParametricKernel {
         // Flip winding after negative determinant reflection
         val fixedTris = mirrored.triangles.map { Triangle3D(it.v0, it.v2, it.v1, -it.normal) }
         return solid.copy(triangles = solid.triangles + fixedTris, edges = solid.edges + mirrored.edges)
+    }
+
+    fun createSphere(radius: Double, cx: Double = 0.0, cy: Double = 0.0, cz: Double = 0.0, latSteps: Int = 12, lonSteps: Int = 20): Mesh3D {
+        val tris = mutableListOf<Triangle3D>()
+        val edges = mutableListOf<MeshEdge>()
+        val grid = Array(latSteps + 1) { lat ->
+            val theta = PI * lat / latSteps
+            Array(lonSteps) { lon ->
+                val phi = 2.0 * PI * lon / lonSteps
+                Vector3D(
+                    cx + radius * sin(theta) * cos(phi),
+                    cy + radius * sin(theta) * sin(phi),
+                    cz + radius * cos(theta)
+                )
+            }
+        }
+        for (lat in 0 until latSteps) {
+            for (lon in 0 until lonSteps) {
+                val nextLon = (lon + 1) % lonSteps
+                val v00 = grid[lat][lon]
+                val v01 = grid[lat][nextLon]
+                val v10 = grid[lat + 1][lon]
+                val v11 = grid[lat + 1][nextLon]
+
+                if (lat > 0) {
+                    val n1 = Triangle3D.computeNormal(v00, v10, v01)
+                    tris.add(Triangle3D(v00, v10, v01, n1))
+                }
+                if (lat < latSteps - 1) {
+                    val n2 = Triangle3D.computeNormal(v01, v10, v11)
+                    tris.add(Triangle3D(v01, v10, v11, n2))
+                }
+                if (lat % 2 == 0) edges.add(MeshEdge(v00, v01))
+                if (lon % 4 == 0) edges.add(MeshEdge(v00, v10))
+            }
+        }
+        return Mesh3D("sphere", "Sphere", tris, edges)
+    }
+
+    fun createCone(radius: Double, height: Double, cx: Double = 0.0, cy: Double = 0.0, cz: Double = 0.0, segments: Int = 24): Mesh3D {
+        val tris = mutableListOf<Triangle3D>()
+        val edges = mutableListOf<MeshEdge>()
+        val apex = Vector3D(cx, cy, cz + height)
+        val baseCenter = Vector3D(cx, cy, cz)
+        val basePts = Array(segments) { i ->
+            val a = 2.0 * PI * i / segments
+            Vector3D(cx + radius * cos(a), cy + radius * sin(a), cz)
+        }
+        for (i in 0 until segments) {
+            val next = (i + 1) % segments
+            val p1 = basePts[i]; val p2 = basePts[next]
+            tris.add(Triangle3D(baseCenter, p2, p1, Vector3D(0.0, 0.0, -1.0)))
+            val sn = Triangle3D.computeNormal(p1, apex, p2)
+            tris.add(Triangle3D(p1, apex, p2, sn))
+            edges.add(MeshEdge(p1, p2))
+            if (i % 4 == 0) edges.add(MeshEdge(p1, apex))
+        }
+        return Mesh3D("cone", "Cone", tris, edges)
+    }
+
+    fun createTorus(majorR: Double, minorR: Double, cx: Double = 0.0, cy: Double = 0.0, cz: Double = 0.0, majorSegs: Int = 20, minorSegs: Int = 12): Mesh3D {
+        val tris = mutableListOf<Triangle3D>()
+        val edges = mutableListOf<MeshEdge>()
+        val grid = Array(majorSegs) { u ->
+            val phi = 2.0 * PI * u / majorSegs
+            Array(minorSegs) { v ->
+                val theta = 2.0 * PI * v / minorSegs
+                val x = cx + (majorR + minorR * cos(theta)) * cos(phi)
+                val y = cy + (majorR + minorR * cos(theta)) * sin(phi)
+                val z = cz + minorR * sin(theta)
+                Vector3D(x, y, z)
+            }
+        }
+        for (u in 0 until majorSegs) {
+            val nextU = (u + 1) % majorSegs
+            for (v in 0 until minorSegs) {
+                val nextV = (v + 1) % minorSegs
+                val v00 = grid[u][v]
+                val v10 = grid[nextU][v]
+                val v01 = grid[u][nextV]
+                val v11 = grid[nextU][nextV]
+
+                val n1 = Triangle3D.computeNormal(v00, v10, v01)
+                tris.add(Triangle3D(v00, v10, v01, n1))
+                val n2 = Triangle3D.computeNormal(v01, v10, v11)
+                tris.add(Triangle3D(v01, v10, v11, n2))
+
+                if (v % 3 == 0) edges.add(MeshEdge(v00, v10))
+                if (u % 4 == 0) edges.add(MeshEdge(v00, v01))
+            }
+        }
+        return Mesh3D("torus", "Torus", tris, edges)
     }
 
     private fun alignToPlane(mesh: Mesh3D, plane: SketchPlane): Mesh3D {

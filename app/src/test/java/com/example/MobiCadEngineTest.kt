@@ -145,4 +145,56 @@ class MobiCadEngineTest {
         val bearing = RoboticsLibrary.generateComponent("BEARING_608", emptyMap())
         assertFalse(bearing.triangles.isEmpty())
     }
+
+    @Test
+    fun test3DPrimitivesCreation() {
+        val sphere = ParametricKernel.createSphere(radius = 12.0)
+        assertFalse(sphere.triangles.isEmpty())
+        assertTrue(sphere.calculateVolume() > 0)
+
+        val cone = ParametricKernel.createCone(radius = 10.0, height = 25.0)
+        assertFalse(cone.triangles.isEmpty())
+        assertTrue(cone.calculateVolume() > 0)
+
+        val torus = ParametricKernel.createTorus(majorR = 20.0, minorR = 5.0)
+        assertFalse(torus.triangles.isEmpty())
+    }
+
+    @Test
+    fun testPerspectiveAndOrthoCameraProjections() {
+        val camera = com.example.mobicad.viewport.Camera3D()
+        val pt = Vector3D(10.0, 10.0, 10.0)
+
+        // Perspective
+        camera.isPerspective = true
+        val perspProj = camera.project(pt, 800.0, 600.0)
+        assertNotNull(perspProj)
+
+        // Orthographic
+        camera.isPerspective = false
+        val orthoProj = camera.project(pt, 800.0, 600.0)
+        assertNotNull(orthoProj)
+    }
+
+    @Test
+    fun testHitTestObjectSelection() {
+        val box = ParametricKernel.createBox(-10.0, -10.0, -10.0, 10.0, 10.0, 10.0)
+        val camera = com.example.mobicad.viewport.Camera3D().apply {
+            yawDeg = 0.0
+            pitchDeg = 0.0
+            distance = 50.0
+        }
+
+        // Center tap (400, 300 on an 800x600 screen) should hit the box centered at origin
+        val hitCenter = com.example.mobicad.viewport.ViewportRenderer.hitTest(
+            400f, 300f, camera, box, 800.0, 600.0
+        )
+        assertTrue(hitCenter)
+
+        // Tap far off at corner (10, 10) should not hit
+        val hitCorner = com.example.mobicad.viewport.ViewportRenderer.hitTest(
+            10f, 10f, camera, box, 800.0, 600.0
+        )
+        assertFalse(hitCorner)
+    }
 }

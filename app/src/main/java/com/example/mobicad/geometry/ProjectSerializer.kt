@@ -312,18 +312,38 @@ object ProjectSerializer {
         return file
     }
 
-    fun listLocalProjects(context: Context): List<Pair<String, String>> {
+    data class ProjectMetadata(
+        val id: String,
+        val name: String,
+        val lastModified: Long,
+        val featureCount: Int,
+        val materialName: String
+    )
+
+    fun listProjectMetadata(context: Context): List<ProjectMetadata> {
         val dir = File(context.filesDir, "mobicad_projects")
         if (!dir.exists()) return emptyList()
         val files = dir.listFiles { f -> f.extension == "mobicad" } ?: return emptyList()
-        return files.map { f ->
+        return files.mapNotNull { f ->
             try {
                 val json = JSONObject(f.readText())
-                Pair(f.nameWithoutExtension, json.optString("name", "Untitled"))
+                ProjectMetadata(
+                    id = f.nameWithoutExtension,
+                    name = json.optString("name", "Untitled"),
+                    lastModified = json.optLong("lastModifiedTimestamp", f.lastModified()),
+                    featureCount = json.optJSONArray("features")?.length() ?: 0,
+                    materialName = json.optString("materialName", "PLA")
+                )
             } catch (e: Exception) {
-                Pair(f.nameWithoutExtension, f.nameWithoutExtension)
+                null
             }
-        }
+        }.sortedByDescending { it.lastModified }
+    }
+
+    fun deleteProjectLocally(context: Context, projectId: String): Boolean {
+        val dir = File(context.filesDir, "mobicad_projects")
+        val file = File(dir, "$projectId.mobicad")
+        return file.delete()
     }
 
     fun loadProjectLocally(context: Context, projectId: String): CadProject? {
@@ -335,6 +355,35 @@ object ProjectSerializer {
         } catch (e: Exception) {
             null
         }
+    }
+
+    fun duplicateProjectLocally(context: Context, projectId: String): CadProject? {
+        val original = loadProjectLocally(context, projectId) ?: return null
+        val copy = fromJson(toJson(original)).copy(
+            id = java.util.UUID.randomUUID().toString(),
+            name = "${original.name} (Copy)"
+        )
+        saveProjectLocally(context, copy)
+        return copy
+    }
+
+    fun autosaveProject(context: Context, project: CadProject) {
+        val file = File(context.filesDir, "autosave.mobicad")
+        file.writeText(toJson(project))
+    }
+
+    fun loadAutosavedProject(context: Context): CadProject? {
+        val file = File(context.filesDir, "autosave.mobicad")
+        if (!file.exists()) return null
+        return try {
+            fromJson(file.readText())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun hasAutosavedProject(context: Context): Boolean {
+        return File(context.filesDir, "autosave.mobicad").exists()
     }
 
     fun createSampleProject(sampleName: String): CadProject {

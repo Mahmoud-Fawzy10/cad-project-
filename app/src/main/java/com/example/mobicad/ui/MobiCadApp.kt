@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.mobicad.geometry.ParametricKernel
 import com.example.mobicad.geometry.ProjectSerializer
 import com.example.mobicad.geometry.RoboticsLibrary
@@ -75,6 +76,7 @@ fun MobiCadApp() {
     var showAssemblyPanel by remember { mutableStateOf(false) }
     var showProjectManager by remember { mutableStateOf(false) }
     var showCopilotDialog by remember { mutableStateOf(false) }
+    var showPrimitivesDialog by remember { mutableStateOf(false) }
 
     // Feature creation dialog (Extrude, Cut, Hole, etc.)
     var pendingFeatureType by remember { mutableStateOf<FeatureType?>(null) }
@@ -254,7 +256,19 @@ fun MobiCadApp() {
                             Text(CadStrings.get("hole", currentLang), color = Color.White, fontSize = 12.sp)
                         }
 
-                        // 6. Fillet Button
+                        // 6. 3D Primitives Button
+                        Button(
+                            onClick = { showPrimitivesDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = CadSurfaceVariant),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier.testTag("toolbar_primitives_btn")
+                        ) {
+                            Icon(Icons.Default.Category, contentDescription = null, tint = CadCyan, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("3D Primitives", color = Color.White, fontSize = 12.sp)
+                        }
+
+                        // 7. Fillet Button
                         Button(
                             onClick = {
                                 pushUndoState()
@@ -477,6 +491,64 @@ fun MobiCadApp() {
                     lang = currentLang,
                     onDismiss = { showCopilotDialog = false }
                 )
+            }
+
+            // 3D Primitives Selection Dialog
+            if (showPrimitivesDialog) {
+                Dialog(onDismissRequest = { showPrimitivesDialog = false }) {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = CadSurfaceDark),
+                        modifier = Modifier.fillMaxWidth().padding(8.dp).testTag("primitives_dialog")
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Insert 3D Primitive", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                                IconButton(onClick = { showPrimitivesDialog = false }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            val prims = listOf(
+                                Pair(FeatureType.PRIMITIVE_BOX, "Solid Box / Cube (30×30×20 mm)"),
+                                Pair(FeatureType.PRIMITIVE_CYLINDER, "Solid Cylinder (r=15, h=30 mm)"),
+                                Pair(FeatureType.PRIMITIVE_SPHERE, "Solid Sphere (r=15 mm)"),
+                                Pair(FeatureType.PRIMITIVE_CONE, "Solid Cone (r=15, h=30 mm)"),
+                                Pair(FeatureType.PRIMITIVE_TORUS, "Solid Torus / Ring (R=20, r=6 mm)")
+                            )
+                            for ((fType, label) in prims) {
+                                Card(
+                                    onClick = {
+                                        pushUndoState()
+                                        val f = Feature(name = label.substringBefore(" ("), type = fType)
+                                        when (fType) {
+                                            FeatureType.PRIMITIVE_BOX -> { f.numericParams["width"] = 30.0; f.numericParams["length"] = 30.0; f.numericParams["height"] = 20.0 }
+                                            FeatureType.PRIMITIVE_CYLINDER -> { f.numericParams["radius"] = 15.0; f.numericParams["height"] = 30.0 }
+                                            FeatureType.PRIMITIVE_SPHERE -> { f.numericParams["radius"] = 15.0 }
+                                            FeatureType.PRIMITIVE_CONE -> { f.numericParams["radius"] = 15.0; f.numericParams["height"] = 30.0 }
+                                            FeatureType.PRIMITIVE_TORUS -> { f.numericParams["majorRadius"] = 20.0; f.numericParams["minorRadius"] = 6.0 }
+                                            else -> {}
+                                        }
+                                        currentProject.features.add(f)
+                                        ParametricKernel.recompute(currentProject)
+                                        ProjectSerializer.autosaveProject(context, currentProject)
+                                        camera.fitToBoundingBox(currentProject.generatedMesh?.boundingBox ?: BoundingBox.EMPTY)
+                                        showPrimitivesDialog = false
+                                    },
+                                    colors = CardDefaults.cardColors(containerColor = CadSurfaceVariant),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("add_prim_${fType.name}")
+                                ) {
+                                    Text(label, color = Color.White, fontSize = 13.sp, modifier = Modifier.padding(12.dp))
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Numeric Keypad for Pending Extrude / Cut Depth
