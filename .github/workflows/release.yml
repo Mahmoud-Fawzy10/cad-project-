@@ -1,0 +1,60 @@
+name: Build & Release MobiCAD Pro
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x ./gradlew
+
+      # --- هذه الخطوة تولد المفتاح أوتوماتيكياً على سيرفر جيت هب ---
+      - name: Generate Release Keystore Automatically
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -storetype JKS \
+            -storepass android \
+            -keypass android \
+            -alias mahmoud-apps \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Mahmoud Mohamed Fawzy,O=MobiCAD,C=EG" \
+            -noprompt
+
+      # --- تعديل مؤقت لإخبار الجرادل بمكان المفتاح المولّد ---
+      - name: Build Signed Release APK
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.signingConfigs.release.storeFile=../release.keystore \
+            -Pandroid.signingConfigs.release.storePassword=android \
+            -Pandroid.signingConfigs.release.keyAlias=mahmoud-apps \
+            -Pandroid.signingConfigs.release.keyPassword=android \
+            --no-daemon
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
