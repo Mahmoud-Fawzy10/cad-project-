@@ -32,7 +32,7 @@ jobs:
             echo "Restoring debug.keystore from debug.keystore.base64..."
             base64 -d debug.keystore.base64 > debug.keystore
           fi
-          if [ -f ".env.example" ] && [ ! -env ]; then
+          if [ -f ".env.example" ] && [ ! -f ".env" ]; then
             echo "Creating .env from .env.example..."
             cp .env.example .env
           fi
@@ -41,7 +41,17 @@ jobs:
         run: |
           if [ ! -f "debug.keystore" ]; then
             echo "Generating missing debug.keystore..."
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storetype JKS \
+              -storepass android \
+              -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US" \
+              -noprompt
           fi
 
       - name: Grant Execute Permission for Gradlew
