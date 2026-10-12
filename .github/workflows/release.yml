@@ -3,7 +3,7 @@ name: Build & Release MobiCAD Pro
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*' # سيعمل تلقائياً أول ما تعمل Tag يبدأ بحرف v (مثال: v1.0.0)
 
 jobs:
   release:
@@ -26,7 +26,6 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x ./gradlew
 
-      # --- هذه الخطوة تولد المفتاح أوتوماتيكياً على سيرفر جيت هب ---
       - name: Generate Release Keystore Automatically
         run: |
           keytool -genkeypair -v \
@@ -41,7 +40,6 @@ jobs:
             -dname "CN=Mahmoud Mohamed Fawzy,O=MobiCAD,C=EG" \
             -noprompt
 
-      # --- تعديل مؤقت لإخبار الجرادل بمكان المفتاح المولّد ---
       - name: Build Signed Release APK
         run: |
           ./gradlew assembleRelease \
@@ -51,7 +49,7 @@ jobs:
             -Pandroid.signingConfigs.release.keyPassword=android \
             --no-daemon
 
-      - name: Upload to GitHub Releases
+      - name: Create GitHub Release & Upload APK
         uses: softprops/action-gh-release@v2
         with:
           files: app/build/outputs/apk/release/*.apk
